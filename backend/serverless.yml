@@ -1,5 +1,5 @@
 org: Shorun
-app: serverless
+app: Shorun
 service: serverless
 
 plugins:
@@ -7,12 +7,13 @@ plugins:
   - serverless-iam-roles-per-function
   - serverless-reqvalidator-plugin
   - serverless-aws-documentation
+  - serverless-plugin-tracing
 
 provider:
   name: aws
   runtime: nodejs12.x
-  stage: ${opt:stage, 'dev'}
-  region: ${opt:region, 'us-east-2'}
+  stage: dev
+  region: us-east-2
   
 #  X-Ray Tracing
   tracing: 
@@ -23,6 +24,25 @@ provider:
     PROJECT_NAME: udacity
     TODOS_TABLE: udacity-serverless-application-todo-${self:provider.stage}
     S3_BUCKET_NAME: udacity-serverless-application-todo-${self:provider.stage}
+  logs:
+    restApi: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - xray:PutTelemetryRecords
+            - xray:PutTraceSegments
+            - xray:GetSamplingRules
+            - xray:GetSamplingTargets
+            - xray:GetSamplingStatisticSummaries
+            - xray:BatchGetTraces
+            - xray:GetServiceGraph
+            - xray:GetTraceGraph
+            - xray:GetTraceSummaries
+            - xray:GetGroups
+            - xray:GetGroup
+          Resource: "*"
 
 custom:
   documentation:
@@ -75,6 +95,8 @@ functions:
           path: todos
           cors: true
           authorizer: Auth
+          reqValidatorName: "RequestBodyValidator"
+    iamRoleStatementsInherit: true
     iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-get-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
@@ -83,9 +105,8 @@ functions:
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
       - Effect: Allow
         Action:
-          - xray:PutTraceSegments
-        Resource: 
-          - '*'
+          - s3:GetObject
+        Resource: arn:aws:s3:::${self:provider.environment.S3_BUCKET_NAME}/*
 
   # TODO: Configure this function
  
@@ -103,17 +124,13 @@ functions:
             requestModels:
               "application/json": CreateTodoRequest
           reqValidatorName: RequestBodyValidator
+    iamRoleStatementsInherit: true
     iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-create-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
           - dynamodb:PutItem
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
-      - Effect: Allow
-        Action:
-          - xray:PutTraceSegments
-        Resource: 
-          - '*'
 
   # TODO: Configure this function
   UpdateTodo:
@@ -130,17 +147,13 @@ functions:
             requestModels:
               "application/json": UpdateTodoRequest
           reqValidatorName: RequestBodyValidator
+    iamRoleStatementsInherit: true
     iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-update-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
           - dynamodb:UpdateItem
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
-      - Effect: Allow
-        Action:
-          - xray:PutTraceSegments
-        Resource: 
-          - '*'
 
   # DELETE: Configure this function
   DeleteTodo:
@@ -151,17 +164,14 @@ functions:
           path: todos/{todoId}
           cors: true
           authorizer: Auth
+          reqValidatorName: "RequestBodyValidator"
+    iamRoleStatementsInherit: true
     iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-delete-todo-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
           - dynamodb:DeleteItem
         Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
-      - Effect: Allow
-        Action:
-          - xray:PutTraceSegments
-        Resource: 
-          - '*'
 
   # POST: Configure this function
   GenerateUploadUrl:
@@ -172,13 +182,18 @@ functions:
           path: todos/{todoId}/attachment
           cors: true
           authorizer: Auth
+          reqValidatorName: "RequestBodyValidator"
     iamRoleStatementsName: ${self:provider.environment.PROJECT_NAME}-s3-upload-role-${self:provider.stage}
     iamRoleStatements:
       - Effect: Allow
         Action:
-          - s3:*
-          - xray:PutTraceSegments 
+          - s3:PutObject
         Resource: arn:aws:s3:::${self:provider.environment.S3_BUCKET_NAME}/*
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+          - dynamodb:GetItem
+        Resource: arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
 
 resources:
   Resources:
@@ -222,7 +237,7 @@ resources:
                 - POST
                 - DELETE
                 - HEAD
-              MaxAge: 300
+              MaxAge: 3000
 
     RequestBodyValidator:
       Type: AWS::ApiGateway::RequestValidator
